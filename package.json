@@ -1,0 +1,31 @@
+{
+  "name": "leadsync",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "initdb": "node server/db/initDb.js",
+    "start": "node server/server.js",
+    "client": "npm --prefix client start",
+    "checkdb": "node -e \"const db = require('./server/db/db'); db.query('SELECT COUNT(*) FROM leads').then(res => { console.log('Lead count:', res.rows[0].count); db.end(); }).catch(err => { console.error(err); db.end(); })\"",
+    "checkdb:rows": "node -e \"const db = require('./server/db/db'); db.query('SELECT * FROM leads ORDER BY created_at DESC LIMIT 10').then(res => { console.log(res.rows); db.end(); }).catch(err => { console.error(err); db.end(); })\"",
+    "checkdb:dups": "node -e \"const db = require('./server/db/db'); db.query('SELECT website, email, phone, COUNT(*) FROM leads GROUP BY website, email, phone HAVING COUNT(*) > 1').then(res => { console.log(res.rows); db.end(); }).catch(err => { console.error(err); db.end(); })\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "axios": "^1.17.0",
+    "cheerio": "^1.2.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "mysql2": "^3.22.4",
+    "pg": "^8.21.0",
+    "puppeteer": "^25.1.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}

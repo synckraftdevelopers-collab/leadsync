@@ -1,17 +1,22 @@
 module.exports = {
   "real estate": [
-    "realestateindia",
-    "justdial",
-    "99acres",
-    "magicbricks"
-  ],
-
-  healthcare: [
-    "practo",
+    "google",
     "justdial"
   ],
 
+  "real_estate": [
+    "google",
+    "justdial"
+  ],
+
+  healthcare: [
+    "google",
+    "justdial",
+    "practo"
+  ],
+
   restaurant: [
+    "google",
     "justdial"
   ],
 

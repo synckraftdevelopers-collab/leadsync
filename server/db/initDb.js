@@ -10,7 +10,10 @@ CREATE TABLE IF NOT EXISTS leads (
     website TEXT,
     address TEXT,
     city TEXT,
+    category TEXT,
     source TEXT,
+    confidence_score INTEGER,
+    is_valid_lead BOOLEAN,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT unique_lead UNIQUE(business_name, email, phone)
 );

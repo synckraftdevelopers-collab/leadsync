@@ -13,8 +13,8 @@ async function saveLead(lead) {
 
     if (checkDup.rows.length === 0) {
       const res = await db.query(
-        `INSERT INTO leads (business_name, owner_name, email, phone, website, address, city, source) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `INSERT INTO leads (business_name, owner_name, email, phone, website, address, city, category, source, confidence_score, is_valid_lead) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING *`,
         [
           lead.businessName,
@@ -24,7 +24,10 @@ async function saveLead(lead) {
           lead.website,
           lead.address,
           lead.city,
-          lead.source
+          lead.category || lead.industry || null,
+          lead.source,
+          lead.confidenceScore || null,
+          lead.isValidLead !== undefined ? lead.isValidLead : true
         ]
       );
       console.log(`[Database] Saved new lead: ${lead.businessName}`);

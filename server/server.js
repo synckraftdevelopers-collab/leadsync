@@ -1,3 +1,4 @@
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 
@@ -6,60 +7,92 @@ const sourceRouter = require("./scrapers/sourceRouter");
 const saveLead = require("./db/saveLead");
 const db = require("./db/db");
 const runLeadEngine = require("./services/leadEngine");
+const groqQueryParser = require("./services/groqQueryParser");
+const leadOrchestrator = require("./services/leadOrchestrator");
+const scrapeGraphEnrichment = require("./services/scrapeGraphEnrichment");
+const groqLeadValidator = require("./services/groqLeadValidator");
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-app.post("/generate-leads", async (req, res) => {
-  try {
-    const { query } = req.body;
-    console.log(`[Server] Received query: "${query}"`);
+app.post(
+  "/generate-leads",
+  async (req, res) => {
+    try {
+      const { query } = req.body;
+      console.log(`[Server] Received query for generate-leads: "${query}"`);
 
-    // Parse user query
-    const parsedData = parseQuery(query);
-    console.log(`[Server] Parsed data: category="${parsedData.category}", location="${parsedData.location}"`);
+      const parsed = await groqQueryParser(query);
+      console.log(`[Server] Groq parsed:`, parsed);
 
-    // Log query in searches database (skip if query was already searched before)
-    if (query && query.trim()) {
-      try {
-        await db.query(
-          "INSERT INTO searches (query) VALUES ($1) ON CONFLICT (query) DO NOTHING",
-          [query.trim()]
-        );
-      } catch (err) {
-        console.error("[Server] Search logging error:", err.message);
+      // Log search
+      if (query && query.trim()) {
+        try {
+          await db.query(
+            "INSERT INTO searches (query) VALUES ($1) ON CONFLICT (query) DO NOTHING",
+            [query.trim()]
+          );
+        } catch (err) {
+          console.error("[Server] Search logging error:", err.message);
+        }
       }
-    }
 
-    // Call sourceRouter to resolve query category and city to appropriate scraper
-    const city = parsedData.location || "Nagpur";
-    const leads = await sourceRouter(parsedData.category, city);
+      const uniqueLeads = await leadOrchestrator(parsed);
+      const validatedLeads = [];
 
-    console.log(`[Server] Saving ${leads.length} leads to database...`);
-    for (const lead of leads) {
-      try {
-        await saveLead(lead);
-      } catch (err) {
-        console.error(`[Server] Error saving lead ${lead.businessName || 'Unknown'}:`, err.message);
+      for (const lead of uniqueLeads) {
+        let currentLead = {
+          ...lead,
+          city: lead.city || parsed.city || "Pune",
+          category: lead.category || parsed.category || "healthcare"
+        };
+
+        // ScrapeGraphAI Enrichment
+        if (currentLead.website) {
+          try {
+            currentLead = await scrapeGraphEnrichment(currentLead);
+          } catch (enrichErr) {
+            console.error(`[Server] Enrichment failed for ${currentLead.businessName}:`, enrichErr.message);
+          }
+        }
+
+        // Groq Validation
+        try {
+          const validation = await groqLeadValidator(currentLead);
+          currentLead.confidenceScore = validation.confidence || 50;
+          currentLead.industry = validation.industry || parsed.category || "unknown";
+
+          if (validation.validLead) {
+            try {
+              await saveLead(currentLead);
+              validatedLeads.push(currentLead);
+            } catch (saveErr) {
+              console.error(`[Server] Error saving lead ${currentLead.businessName}:`, saveErr.message);
+            }
+          } else {
+            console.log(`[Server] Rejected invalid lead: "${currentLead.businessName}" (Confidence: ${validation.confidence}%)`);
+          }
+        } catch (valErr) {
+          console.error(`[Server] Validation failed for ${currentLead.businessName}:`, valErr.message);
+        }
       }
-    }
 
-    console.log(`[Server] Request completed successfully!`);
-    res.json({
-      success: true,
-      parsedData,
-      totalLeads: leads.length,
-      leads
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
+      res.json({
+        success: true,
+        query,
+        parsedData: parsed,
+        totalLeads: validatedLeads.length,
+        leads: validatedLeads
+      });
+    } catch (error) {
+      console.error("[Server] Error in /generate-leads:", error.message);
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
 });
 
 app.post("/universal-leads", async (req, res) => {
@@ -150,6 +183,41 @@ app.get("/dashboard-stats", async (req, res) => {
     });
   } catch (error) {
     console.error("[Server] GET /dashboard-stats error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get("/leads", async (req, res) => {
+  try {
+    const result = await db.query("SELECT * FROM leads ORDER BY created_at DESC");
+    
+    // Map database columns (snake_case) to frontend camelCase keys
+    const leads = result.rows.map(row => ({
+      id: row.id,
+      businessName: row.business_name,
+      ownerName: row.owner_name,
+      email: row.email,
+      phone: row.phone,
+      website: row.website,
+      address: row.address,
+      city: row.city,
+      category: row.category,
+      source: row.source,
+      confidenceScore: row.confidence_score,
+      isValidLead: row.is_valid_lead,
+      createdAt: row.created_at
+    }));
+
+    res.json({
+      success: true,
+      totalLeads: leads.length,
+      leads
+    });
+  } catch (error) {
+    console.error("[Server] GET /leads error:", error);
     res.status(500).json({
       success: false,
       error: error.message

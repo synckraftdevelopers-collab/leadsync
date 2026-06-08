@@ -1,5 +1,5 @@
-const puppeteer = require("d:/my_pro/synckraft/LeadSync/leadsync/node_modules/puppeteer-extra");
-const StealthPlugin = require("d:/my_pro/synckraft/LeadSync/leadsync/node_modules/puppeteer-extra-plugin-stealth");
+const puppeteer = require("puppeteer-extra");
+const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 puppeteer.use(StealthPlugin());
 
 async function getListings(category, city) {
@@ -21,7 +21,9 @@ async function getListings(category, city) {
 
   const browser = await puppeteer.launch({
     headless: true,
-    executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    executablePath: process.platform === "win32"
+      ? "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+      : (process.env.CHROME_PATH || undefined),
     args: ["--no-sandbox", "--disable-setuid-sandbox"]
   });
 

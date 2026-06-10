@@ -1,12 +1,10 @@
 const puppeteer = require("puppeteer");
+const browserConfig = require("./config/browser");
 const fs = require("fs");
 
 (async () => {
   console.log("Loading agent profile page to inspect selectors...");
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
-  });
+  const browser = await puppeteer.launch(browserConfig);
 
   try {
     const page = await browser.newPage();

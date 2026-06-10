@@ -11,6 +11,8 @@ const groqQueryParser = require("./services/groqQueryParser");
 const leadOrchestrator = require("./services/leadOrchestrator");
 const scrapeGraphEnrichment = require("./services/scrapeGraphEnrichment");
 const groqLeadValidator = require("./services/groqLeadValidator");
+const taskQueue = require("./services/taskQueue");
+
 
 const app = express();
 
@@ -190,6 +192,119 @@ app.get("/dashboard-stats", async (req, res) => {
   }
 });
 
+app.post("/tasks", async (req, res) => {
+  try {
+    const { query } = req.body;
+    if (!query || !query.trim()) {
+      return res.status(400).json({ success: false, error: "Query is required" });
+    }
+
+    // Smart Caching Check: Has this query been run in the last 24 hours and completed?
+    const cachedTask = await db.query(
+      `SELECT * FROM search_tasks 
+       WHERE LOWER(TRIM(query)) = LOWER(TRIM($1)) 
+       AND status = 'completed' 
+       AND created_at > NOW() - INTERVAL '24 hours'
+       ORDER BY created_at DESC LIMIT 1`,
+      [query.trim()]
+    );
+
+    if (cachedTask.rows.length > 0) {
+      console.log(`[Server] Found cached completed task for query "${query}": ${cachedTask.rows[0].id}`);
+      return res.json({
+        success: true,
+        cached: true,
+        taskId: cachedTask.rows[0].id,
+        message: "Cached results available."
+      });
+    }
+
+    // Otherwise, start a new task
+    const taskId = await taskQueue.createTask(query);
+
+    // Log search query in searches table
+    try {
+      await db.query(
+        "INSERT INTO searches (query) VALUES ($1) ON CONFLICT (query) DO NOTHING",
+        [query.trim()]
+      );
+    } catch (err) {
+      console.error("[Server] Search logging error:", err.message);
+    }
+
+    res.json({
+      success: true,
+      taskId,
+      message: "Background scraping task initiated."
+    });
+  } catch (error) {
+    console.error("[Server] Error in POST /tasks:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get("/tasks/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const task = await taskQueue.getTaskStatus(id);
+
+    if (!task) {
+      return res.status(404).json({ success: false, error: "Task not found" });
+    }
+
+    // Fetch leads associated with this task by parsing the query's target category and city
+    const parsedQuery = await groqQueryParser(task.query);
+    const city = parsedQuery.city || "";
+    const category = parsedQuery.subCategory || parsedQuery.category || "";
+
+    let leads = [];
+    if (city && category) {
+      const result = await db.query(
+        `SELECT * FROM leads 
+         WHERE LOWER(city) = LOWER($1) 
+         AND (LOWER(category) = LOWER($2) OR LOWER(category) LIKE LOWER($3))
+         ORDER BY created_at DESC LIMIT 50`,
+         [city, category, `%${category}%`]
+      );
+      leads = result.rows.map(row => ({
+        id: row.id,
+        businessName: row.business_name,
+        ownerName: row.owner_name,
+        email: row.email,
+        phone: row.phone,
+        whatsapp: row.whatsapp,
+        website: row.website,
+        address: row.address,
+        city: row.city,
+        state: row.state,
+        category: row.category,
+        services: row.services || [],
+        socialLinks: row.social_links || {},
+        source: row.source,
+        confidenceScore: row.confidence_score,
+        leadScore: row.lead_score,
+        isValidLead: row.is_valid_lead,
+        createdAt: row.created_at
+      }));
+    }
+
+    res.json({
+      success: true,
+      task: {
+        id: task.id,
+        query: task.query,
+        status: task.status,
+        progress: task.progress,
+        totalLeads: task.total_leads || leads.length,
+        leads
+      }
+    });
+  } catch (error) {
+    console.error("[Server] Error in GET /tasks/:id:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.get("/leads", async (req, res) => {
   try {
     const result = await db.query("SELECT * FROM leads ORDER BY created_at DESC");
@@ -201,12 +316,17 @@ app.get("/leads", async (req, res) => {
       ownerName: row.owner_name,
       email: row.email,
       phone: row.phone,
+      whatsapp: row.whatsapp,
       website: row.website,
       address: row.address,
       city: row.city,
+      state: row.state,
       category: row.category,
+      services: row.services || [],
+      socialLinks: row.social_links || {},
       source: row.source,
       confidenceScore: row.confidence_score,
+      leadScore: row.lead_score,
       isValidLead: row.is_valid_lead,
       createdAt: row.created_at
     }));
@@ -225,6 +345,7 @@ app.get("/leads", async (req, res) => {
   }
 });
 
-app.listen(3000, () => {
-  console.log("LeadSync server running on port 3000");
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`LeadSync server running on port ${PORT}`);
 });

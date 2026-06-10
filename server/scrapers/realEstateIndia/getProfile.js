@@ -1,13 +1,11 @@
 const puppeteer = require("puppeteer");
+const browserConfig = require("../../config/browser");
 const cheerio = require("cheerio");
 const extractLeads = require("../extractLeads");
 
 async function getProfile(url) {
   console.log(`[RealEstateIndia] Scraping profile: ${url}`);
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
-  });
+  const browser = await puppeteer.launch(browserConfig);
 
   try {
     const page = await browser.newPage();

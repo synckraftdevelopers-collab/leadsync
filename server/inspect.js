@@ -1,13 +1,11 @@
 const puppeteer = require("puppeteer");
+const browserConfig = require("./config/browser");
 const fs = require("fs");
 const path = require("path");
 
 (async () => {
   console.log("Launching Puppeteer...");
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
-  });
+  const browser = await puppeteer.launch(browserConfig);
 
   try {
     const page = await browser.newPage();

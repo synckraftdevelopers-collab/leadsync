@@ -1,17 +1,12 @@
 const puppeteer = require("puppeteer-extra");
+const browserConfig = require("../../config/browser");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 puppeteer.use(StealthPlugin());
 
 async function getListings(category, city) {
   console.log(`[IndiaMART] Harvesting listings for category: "${category}" in city: "${city}"`);
   
-  const browser = await puppeteer.launch({
-    headless: true,
-    executablePath: process.platform === "win32"
-      ? "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
-      : (process.env.CHROME_PATH || undefined),
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
-  });
+  const browser = await puppeteer.launch(browserConfig);
 
   const listings = [];
   const seenUrls = new Set();

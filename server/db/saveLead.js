@@ -11,23 +11,31 @@ async function saveLead(lead) {
       [lead.businessName, lead.email, lead.phone]
     );
 
+    const servicesParam = lead.services ? (typeof lead.services === "string" ? lead.services : JSON.stringify(lead.services)) : null;
+    const socialLinksParam = lead.socialLinks ? (typeof lead.socialLinks === "string" ? lead.socialLinks : JSON.stringify(lead.socialLinks)) : null;
+
     if (checkDup.rows.length === 0) {
       const res = await db.query(
-        `INSERT INTO leads (business_name, owner_name, email, phone, website, address, city, category, source, confidence_score, is_valid_lead) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        `INSERT INTO leads (business_name, owner_name, email, phone, website, address, city, category, source, confidence_score, is_valid_lead, whatsapp, state, services, social_links, lead_score) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
          RETURNING *`,
         [
           lead.businessName,
-          lead.ownerName,
-          lead.email,
-          lead.phone,
-          lead.website,
-          lead.address,
-          lead.city,
+          lead.ownerName || null,
+          lead.email || null,
+          lead.phone || null,
+          lead.website || null,
+          lead.address || null,
+          lead.city || null,
           lead.category || lead.industry || null,
-          lead.source,
-          lead.confidenceScore || null,
-          lead.isValidLead !== undefined ? lead.isValidLead : true
+          lead.source || "Unknown",
+          lead.confidenceScore !== undefined ? lead.confidenceScore : null,
+          lead.isValidLead !== undefined ? lead.isValidLead : true,
+          lead.whatsapp || null,
+          lead.state || null,
+          servicesParam,
+          socialLinksParam,
+          lead.leadScore !== undefined ? lead.leadScore : null
         ]
       );
       console.log(`[Database] Saved new lead: ${lead.businessName}`);
@@ -43,3 +51,4 @@ async function saveLead(lead) {
 }
 
 module.exports = saveLead;
+

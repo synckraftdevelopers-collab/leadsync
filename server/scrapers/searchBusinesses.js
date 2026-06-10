@@ -1,12 +1,10 @@
 const puppeteer = require("puppeteer");
+const browserConfig = require("../config/browser");
 const blockedDomains = require("../utils/blacklist");
 
 async function searchBusinesses(category, location) {
   // Launch Puppeteer headlessly for reliability in background/server tasks
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
-  });
+  const browser = await puppeteer.launch(browserConfig);
 
   try {
     const page = await browser.newPage();

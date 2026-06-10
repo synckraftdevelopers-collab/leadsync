@@ -9,12 +9,12 @@ const groq = new Groq({
  * Returns confidence score and categorizes the industry.
  * 
  * @param {object} lead - The lead to validate
- * @returns {Promise<object>} - { validLead: boolean, confidence: number, industry: string }
+ * @returns {Promise<object>} - { validLead: boolean, confidence: number, industry: string, services: string[] }
  */
 async function groqLeadValidator(lead) {
   const prompt = `
 Validate if the following lead represents a real, legitimate business, clinic, practitioner, or organization.
-Determine if the lead is valid, estimate a confidence score (0-100), and classify the industry (e.g. healthcare, marketing, real estate, education, manufacturing, wholesale, etc.).
+Determine if the lead is valid, estimate a confidence score (0-100), classify the industry, and list up to 5 services they offer.
 
 Lead Details:
 - Business Name: ${lead.businessName}
@@ -25,13 +25,15 @@ Lead Details:
 - Source: ${lead.source || "N/A"}
 
 Rules:
+- Reject leads that are just directories, lists, aggregate reviews (e.g., "Top 10 Doctors in Pune"), or junk landing pages. Set "validLead": false for these.
 - Return ONLY valid JSON.
 - Do not include any markdown or code blocks in your response.
 - Output schema:
 {
   "validLead": boolean,
   "confidence": number,
-  "industry": "healthcare" | "marketing" | "real estate" | "education" | "other" (lowercase string classification matching query domain)
+  "industry": "healthcare" | "marketing" | "real estate" | "education" | "energy" | "other" (lowercase string),
+  "services": ["service1", "service2"]
 }
 `;
 
@@ -58,16 +60,23 @@ Rules:
 
     const parsed = JSON.parse(content);
     console.log(`[GroqLeadValidator] Validated "${lead.businessName}": Valid=${parsed.validLead}, Confidence=${parsed.confidence}%, Industry=${parsed.industry}`);
-    return parsed;
+    return {
+      validLead: parsed.validLead !== undefined ? parsed.validLead : true,
+      confidence: parsed.confidence !== undefined ? parsed.confidence : 50,
+      industry: parsed.industry || lead.category || "unknown",
+      services: parsed.services || []
+    };
   } catch (error) {
     console.error("[GroqLeadValidator] Error validating lead:", error.message);
     // Safe fallback defaults
     return {
       validLead: true,
       confidence: 50,
-      industry: lead.category || "unknown"
+      industry: lead.category || "unknown",
+      services: []
     };
   }
 }
 
 module.exports = groqLeadValidator;
+

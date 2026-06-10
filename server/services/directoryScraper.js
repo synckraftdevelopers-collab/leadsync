@@ -1,4 +1,5 @@
 const puppeteer = require("puppeteer");
+const browserConfig = require("../config/browser");
 const cheerio = require("cheerio");
 
 /**
@@ -11,10 +12,7 @@ const cheerio = require("cheerio");
  * Fetch page HTML using Puppeteer (handles JS-rendered content)
  */
 async function fetchWithPuppeteer(url) {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
-  });
+  const browser = await puppeteer.launch(browserConfig);
 
   try {
     const page = await browser.newPage();

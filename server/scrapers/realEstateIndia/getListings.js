@@ -1,11 +1,9 @@
 const puppeteer = require("puppeteer");
+const browserConfig = require("../../config/browser");
 
 async function getListings(city) {
   // Launch Puppeteer headlessly for sandbox reliability
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
-  });
+  const browser = await puppeteer.launch(browserConfig);
 
   try {
     const page = await browser.newPage();

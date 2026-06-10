@@ -4,7 +4,7 @@ const cheerio = require("cheerio");
 /**
  * Generic Website Scraper
  * Works for any individual business website (companywebsite.com)
- * Extracts: Email, Phone, Contact Page, Business Name
+ * Extracts: Email, Phone, Contact Page, Business Name, WhatsApp, Social Links, Services, State
  */
 
 const REQUEST_HEADERS = {
@@ -51,6 +51,96 @@ function extractPhones(text) {
   const phoneRegex = /(\+91[\-\s]?)?[0]?(91)?[6789]\d{9}/g;
   const phones = text.match(phoneRegex) || [];
   return [...new Set(phones.map(p => p.replace(/\s+/g, "")))];
+}
+
+/**
+ * Extract social media profiles
+ */
+function extractSocialLinks($) {
+  const social = {};
+  $("a").each((i, el) => {
+    const href = $(el).attr("href");
+    if (!href) return;
+    const lowerHref = href.toLowerCase();
+    if (lowerHref.includes("facebook.com/") || lowerHref.includes("fb.com/")) social.facebook = href;
+    if (lowerHref.includes("linkedin.com/")) social.linkedin = href;
+    if (lowerHref.includes("twitter.com/") || lowerHref.includes("x.com/")) social.twitter = href;
+    if (lowerHref.includes("instagram.com/")) social.instagram = href;
+    if (lowerHref.includes("youtube.com/")) social.youtube = href;
+  });
+  return social;
+}
+
+/**
+ * Extract WhatsApp contact info
+ */
+function extractWhatsApp($, text) {
+  let whatsapp = "";
+  $("a").each((i, el) => {
+    const href = $(el).attr("href") || "";
+    if (href.includes("wa.me") || href.includes("api.whatsapp.com") || href.includes("whatsapp.com")) {
+      whatsapp = href;
+    }
+  });
+  if (whatsapp) return whatsapp;
+
+  // Search text patterns
+  const waMatch = text.match(/(?:whatsapp|wa\.me|wa)\s*(?::|\-)?\s*([+91]?[0-9\-\s]{10,})/i);
+  if (waMatch && waMatch[1]) {
+    whatsapp = waMatch[1].replace(/[^0-9+]/g, "");
+  }
+  return whatsapp;
+}
+
+/**
+ * Extract list of services
+ */
+function extractServices($, text) {
+  const services = new Set();
+  $("h1, h2, h3, h4, h5").each((i, el) => {
+    const headerText = $(el).text().trim().toLowerCase();
+    if (headerText.includes("service") || headerText.includes("expertise") || headerText.includes("what we do") || headerText.includes("our specialties")) {
+      let parent = $(el).parent();
+      parent.find("li, a, p").each((j, item) => {
+        const itemText = $(item).text().trim();
+        if (itemText.length > 2 && itemText.length < 50 && !itemText.toLowerCase().includes("more")) {
+          services.add(itemText);
+        }
+      });
+    }
+  });
+
+  if (services.size === 0) {
+    $(".service, [class*='service'], [id*='service']").each((i, el) => {
+      const itemText = $(el).text().trim();
+      if (itemText.length > 5 && itemText.length < 100) {
+        const cleanVal = itemText.split("\n")[0].trim();
+        if (cleanVal.length > 2 && cleanVal.length < 50) services.add(cleanVal);
+      }
+    });
+  }
+
+  return Array.from(services).slice(0, 10);
+}
+
+/**
+ * Extract Indian State name
+ */
+function extractState(text) {
+  const states = [
+    "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat",
+    "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala", "Madhya Pradesh",
+    "Maharashtra", "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Punjab", "Rajasthan",
+    "Sikkim", "Tamil Nadu", "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
+    "Delhi", "Goa"
+  ];
+  for (const state of states) {
+    const regex = new RegExp(`\\b${state}\\b`, "i");
+    if (regex.test(text)) {
+      return state;
+    }
+  }
+  return "";
 }
 
 /**
@@ -127,6 +217,10 @@ async function scrapeWebsite(url) {
     const bodyText = $("body").text();
     const allEmails = new Set(extractEmails(bodyText));
     const allPhones = new Set(extractPhones(bodyText));
+    const socialLinks = extractSocialLinks($);
+    const whatsapp = extractWhatsApp($, bodyText);
+    const services = extractServices($, bodyText);
+    const state = extractState(bodyText);
 
     // Find and scrape contact pages
     const urlObj = new URL(url);
@@ -152,13 +246,17 @@ async function scrapeWebsite(url) {
       businessName,
       email: emailList[0] || "",
       phone: phoneList[0] || "",
+      whatsapp: whatsapp || "",
       website: url,
       address: "",
+      state: state || "",
+      services: services || [],
+      socialLinks: socialLinks || {},
       source: urlObj.hostname.replace("www.", ""),
       status: emailList.length > 0 ? "Valid Lead" : "No Email"
     };
 
-    console.log(`[WebsiteScraper] ${businessName} → ${emailList.length} emails, ${phoneList.length} phones`);
+    console.log(`[WebsiteScraper] ${businessName} → ${emailList.length} emails, ${phoneList.length} phones, WhatsApp: ${whatsapp ? "Yes" : "No"}`);
     return lead;
   } catch (error) {
     let businessName = "";
@@ -172,8 +270,12 @@ async function scrapeWebsite(url) {
       businessName,
       email: "",
       phone: "",
+      whatsapp: "",
       website: url,
       address: "",
+      state: "",
+      services: [],
+      socialLinks: {},
       source: businessName,
       status: "Failed",
       error: error.message
@@ -182,3 +284,4 @@ async function scrapeWebsite(url) {
 }
 
 module.exports = scrapeWebsite;
+

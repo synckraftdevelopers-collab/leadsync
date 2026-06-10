@@ -41,6 +41,22 @@ const DIRECTORY_PATTERNS = [
   "globalsources.com",
   "exportersindia.com",
   
+  // Crunchbase & Startup directories
+  "crunchbase.com",
+  "startupdirectory",
+  "startupindia.gov.in",
+  "angel.co",
+  "wellfound.com",
+  
+  // Local business directories / Chambers
+  "chamberofcommerce.com",
+  "chamber-of-commerce",
+  "local.com",
+  "citysearch.com",
+  "hotfrog.com",
+  "showmelocal.com",
+  "cylex",
+  
   // Service directories
   "urbanclap.com",
   "urbncompany.com",

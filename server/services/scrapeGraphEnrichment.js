@@ -28,14 +28,32 @@ async function scrapeGraphEnrichment(lead) {
       "https://v2-api.scrapegraphai.com/api/extract",
       {
         url: website,
-        prompt: "Extract the owner's name, contact email, contact phone number, and physical address of the business.",
+        prompt: "Extract the business name, owner's name, contact email, contact phone number, WhatsApp number, physical address, state/region, key services offered, and social media profile URLs (LinkedIn, Facebook, Instagram, Twitter) from the page.",
         schema: {
           type: "object",
           properties: {
-            ownerName: { type: "string", description: "The name of the business owner, founder, or key practitioner (e.g. Doctor)" },
+            businessName: { type: "string", description: "The name of the business" },
+            ownerName: { type: "string", description: "The name of the business owner, founder, or key practitioner" },
             email: { type: "string", description: "Business contact email" },
             phone: { type: "string", description: "Business contact phone number" },
-            address: { type: "string", description: "Physical address of the business" }
+            whatsapp: { type: "string", description: "WhatsApp contact number" },
+            address: { type: "string", description: "Physical address of the business" },
+            state: { type: "string", description: "State or province" },
+            services: {
+              type: "array",
+              items: { type: "string" },
+              description: "List of key services or products offered"
+            },
+            socialLinks: {
+              type: "object",
+              properties: {
+                linkedin: { type: "string", description: "LinkedIn profile URL" },
+                facebook: { type: "string", description: "Facebook page URL" },
+                instagram: { type: "string", description: "Instagram profile URL" },
+                twitter: { type: "string", description: "Twitter/X profile URL" }
+              },
+              description: "Social media links"
+            }
           }
         }
       },
@@ -72,10 +90,15 @@ async function scrapeGraphEnrichment(lead) {
 
       return {
         ...lead,
+        businessName: lead.businessName && lead.businessName !== "Unknown Business" ? lead.businessName : (parsedData.businessName || lead.businessName),
         ownerName: lead.ownerName || parsedData.ownerName || "",
         email: lead.email || parsedData.email || "",
         phone: lead.phone || parsedData.phone || "",
-        address: lead.address || parsedData.address || ""
+        whatsapp: lead.whatsapp || parsedData.whatsapp || "",
+        address: lead.address || parsedData.address || "",
+        state: lead.state || parsedData.state || "",
+        services: lead.services && lead.services.length > 0 ? lead.services : (parsedData.services || []),
+        socialLinks: lead.socialLinks && Object.keys(lead.socialLinks).length > 0 ? lead.socialLinks : (parsedData.socialLinks || {})
       };
     } else {
       console.warn(`[ScrapeGraphEnrichment] API responded with non-success status:`, response.data);
@@ -96,10 +119,15 @@ async function runLocalFallback(lead, website) {
     const localResult = await scrapeWebsite(website);
     return {
       ...lead,
+      businessName: lead.businessName && lead.businessName !== "Unknown Business" ? lead.businessName : localResult.businessName,
       ownerName: lead.ownerName || "",
       email: lead.email || localResult.email || "",
       phone: lead.phone || localResult.phone || "",
-      address: lead.address || localResult.address || ""
+      whatsapp: lead.whatsapp || localResult.whatsapp || "",
+      address: lead.address || localResult.address || "",
+      state: lead.state || localResult.state || "",
+      services: lead.services && lead.services.length > 0 ? lead.services : (localResult.services || []),
+      socialLinks: lead.socialLinks && Object.keys(lead.socialLinks).length > 0 ? lead.socialLinks : (localResult.socialLinks || {})
     };
   } catch (err) {
     console.error(`[ScrapeGraphEnrichment] Local website scraper failed for ${website}:`, err.message);
@@ -108,3 +136,4 @@ async function runLocalFallback(lead, website) {
 }
 
 module.exports = scrapeGraphEnrichment;
+

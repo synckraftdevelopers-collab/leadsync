@@ -1,4 +1,5 @@
 const puppeteer = require("puppeteer-extra");
+const browserConfig = require("../../config/browser");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 puppeteer.use(StealthPlugin());
 
@@ -19,13 +20,7 @@ async function getListings(category, city) {
   const jdUrl = `https://t.justdial.com/${cityClean}/${categoryPlural}`;
   console.log(`[JustDial] Navigating to listings: ${jdUrl}`);
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    executablePath: process.platform === "win32"
-      ? "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
-      : (process.env.CHROME_PATH || undefined),
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
-  });
+  const browser = await puppeteer.launch(browserConfig);
 
   try {
     const page = await browser.newPage();

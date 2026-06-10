@@ -71,6 +71,61 @@ function extractCategory(query) {
   return query.toLowerCase().split(/\s+/).filter(w => !stop.includes(w) && !cities.includes(w)).join(" ");
 }
 
+const trustedSources = [
+  "google", "justdial", "indiamart", "practo", "sulekha", 
+  "tradeindia", "realestateindia", "crunchbase", "yellowpages", "yelp", "zomato", "swiggy"
+];
+function isTrustedSource(source) {
+  const sourceLower = String(source || "").toLowerCase();
+  return trustedSources.some(ts => sourceLower.includes(ts));
+}
+
+function getCompleteness(lead) {
+  let count = 0;
+  if (lead.email) count++;
+  if (lead.phone) count++;
+  if (lead.website) count++;
+  if (lead.address) count++;
+  return count;
+}
+
+function sortLeads(a, b) {
+  // 1. Highest confidence score
+  const confA = a.confidenceScore !== undefined ? a.confidenceScore : 50;
+  const confB = b.confidenceScore !== undefined ? b.confidenceScore : 50;
+  if (confB !== confA) return confB - confA;
+
+  // 2. Complete contact information
+  const compA = getCompleteness(a);
+  const compB = getCompleteness(b);
+  if (compB !== compA) return compB - compA;
+
+  // 3. Website available
+  const webA = a.website ? 1 : 0;
+  const webB = b.website ? 1 : 0;
+  if (webB !== webA) return webB - webA;
+
+  // 4. Email available
+  const emailA = a.email ? 1 : 0;
+  const emailB = b.email ? 1 : 0;
+  if (emailB !== emailA) return emailB - emailA;
+
+  // 5. Phone available
+  const phoneA = a.phone ? 1 : 0;
+  const phoneB = b.phone ? 1 : 0;
+  if (phoneB !== phoneA) return phoneB - phoneA;
+
+  // 6. Trusted source
+  const trustA = isTrustedSource(a.source) ? 1 : 0;
+  const trustB = isTrustedSource(b.source) ? 1 : 0;
+  if (trustB !== trustA) return trustB - trustA;
+
+  // Tie breaker: lead score
+  const scoreA = a.leadScore || 0;
+  const scoreB = b.leadScore || 0;
+  return scoreB - scoreA;
+}
+
 /* ── Animated Counter Hook ─────────────────────────────────── */
 function useAnimatedCounter(target, duration = 1200) {
   const [value, setValue] = useState(0);
@@ -113,6 +168,12 @@ function App() {
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedSource, setSelectedSource] = useState("");
 
+  /* ── Search Limits & Paging states ─────────────────────── */
+  const [currentSearchLeads, setCurrentSearchLeads] = useState([]);
+  const [visibleCount, setVisibleCount] = useState(20);
+  const [hasActiveSearch, setHasActiveSearch] = useState(false);
+  const [currentSearchQuery, setCurrentSearchQuery] = useState("");
+
   /* ── API Loading & Error states ────────────────────────── */
   // eslint-disable-next-line no-unused-vars
   const [statsLoading, setStatsLoading] = useState(false);
@@ -125,13 +186,16 @@ function App() {
   const activeDetailLead = drawerLead || selectedLead;
   const [progressStage, setProgressStage] = useState(0);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [sourceDiagnostics, setSourceDiagnostics] = useState(null);
 
   /* ── Derived data for filtering ───────────────────────── */
-  const uniqueCities = [...new Set(allLeads.map(l => l.city).filter(Boolean))];
-  const uniqueCategories = [...new Set(allLeads.map(l => l.category).filter(Boolean))];
-  const uniqueSources = [...new Set(allLeads.map(l => l.source).filter(Boolean))];
+  const activeLeads = hasActiveSearch ? currentSearchLeads : allLeads;
 
-  const filteredLeads = allLeads.filter(lead => {
+  const uniqueCities = [...new Set(activeLeads.map(l => l.city).filter(Boolean))];
+  const uniqueCategories = [...new Set(activeLeads.map(l => l.category).filter(Boolean))];
+  const uniqueSources = [...new Set(activeLeads.map(l => l.source).filter(Boolean))];
+
+  const filteredLeads = activeLeads.filter(lead => {
     const matchesSearch = 
       !searchTerm ||
       (lead.businessName && lead.businessName.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -147,16 +211,29 @@ function App() {
     return matchesSearch && matchesCity && matchesCategory && matchesSource;
   });
 
-  const whatsappCount = filteredLeads.filter(l => l.phone && l.phone.length >= 10).length;
-  const websiteCount = filteredLeads.filter(l => l.website).length;
-  const successRate = filteredLeads.length ? Math.round((filteredLeads.filter(l => l.email || l.phone).length / filteredLeads.length) * 100) : (stats.emailsFound + stats.phonesFound > 0 ? 87 : 0);
-  const avgScore = filteredLeads.length ? Math.round(filteredLeads.reduce((a, l) => a + (l.confidenceScore || computeLeadScore(l)), 0) / filteredLeads.length) : 0;
+  const sortedLeads = [...filteredLeads].sort(sortLeads);
+
+  const cachedLeadsCount = sortedLeads.filter(lead => lead.isCached === true).length;
+  const freshLeadsCount = sortedLeads.filter(lead => lead.isCached === false || lead.isCached === undefined).length;
+  const totalLeadsCount = sortedLeads.length;
+
+  const sourceDistribution = sortedLeads.reduce((acc, lead) => {
+    const src = lead.source || "Web";
+    const displayName = src.charAt(0).toUpperCase() + src.slice(1);
+    acc[displayName] = (acc[displayName] || 0) + 1;
+    return acc;
+  }, {});
+
+  const whatsappCount = sortedLeads.filter(l => l.phone && l.phone.length >= 10).length;
+  const websiteCount = sortedLeads.filter(l => l.website).length;
+  const successRate = sortedLeads.length ? Math.round((sortedLeads.filter(l => l.email || l.phone).length / sortedLeads.length) * 100) : (stats.emailsFound + stats.phonesFound > 0 ? 87 : 0);
+  const avgScore = sortedLeads.length ? Math.round(sortedLeads.reduce((a, l) => a + (l.confidenceScore || computeLeadScore(l)), 0) / sortedLeads.length) : 0;
   
   const extendedStats = {
-    totalLeads: filteredLeads.length,
+    totalLeads: sortedLeads.length,
     totalSearches: stats.totalSearches,
-    emailsFound: filteredLeads.filter(l => l.email).length,
-    phonesFound: filteredLeads.filter(l => l.phone).length,
+    emailsFound: sortedLeads.filter(l => l.email).length,
+    phonesFound: sortedLeads.filter(l => l.phone).length,
     whatsapp: whatsappCount,
     websites: websiteCount,
     successRate,
@@ -176,6 +253,13 @@ function App() {
     setLeadsLoading(true);
     setStatsError(null);
     setLeadsError(null);
+
+    const fetchSourceHealth = async () => {
+      try {
+        const res = await api.get("/source-health");
+        if (res.data.success) setSourceDiagnostics(res.data.diagnostics);
+      } catch (e) { console.error("Error fetching source health:", e); }
+    };
 
     const fetchStatsAndHistoryPromise = async () => {
       try {
@@ -207,7 +291,7 @@ function App() {
       }
     };
 
-    await Promise.all([fetchStatsAndHistoryPromise(), fetchLeadsPromise()]);
+    await Promise.all([fetchStatsAndHistoryPromise(), fetchLeadsPromise(), fetchSourceHealth()]);
   };
 
   /* ── Preserved: fetch on mount ─────────────────────────── */
@@ -229,6 +313,10 @@ function App() {
     if (!activeQuery.trim()) return;
     try {
       setLoading(true);
+      setHasActiveSearch(true);
+      setCurrentSearchLeads([]);
+      setVisibleCount(20);
+      setCurrentSearchQuery(activeQuery);
       setLeads([]);
       setStatusText("Initializing background discovery task...");
       
@@ -238,6 +326,15 @@ function App() {
       if (cached) {
         setStatusText("Cached results retrieved successfully!");
         setLoading(false);
+        try {
+          const statusRes = await api.get(`/tasks/${taskId}`);
+          if (statusRes.data.success && statusRes.data.task.leads) {
+            const fetched = statusRes.data.task.leads || [];
+            setCurrentSearchLeads(fetched.sort(sortLeads));
+          }
+        } catch (cacheErr) {
+          console.error("Error fetching cached task leads:", cacheErr);
+        }
         await loadDashboardData();
         return;
       }
@@ -256,6 +353,10 @@ function App() {
 
             // Merge newly found leads incrementally
             if (task.leads && task.leads.length > 0) {
+              const sorted = [...task.leads].sort(sortLeads);
+              setCurrentSearchLeads(sorted);
+              
+              // Also merge into allLeads
               setAllLeads(prevLeads => {
                 const merged = [...task.leads, ...prevLeads];
                 const seen = new Set();
@@ -271,7 +372,19 @@ function App() {
             if (task.status === "completed" || task.status === "failed") {
               clearInterval(pollInterval);
               setLoading(false);
-              setStatusText(task.status === "completed" ? "" : "Scraping task encountered errors.");
+              setStatusText("");
+              
+              // Final sync to make sure we got all leads
+              try {
+                const finalRes = await api.get(`/tasks/${taskId}`);
+                if (finalRes.data.success && finalRes.data.task.leads) {
+                  setCurrentSearchLeads(finalRes.data.task.leads.sort(sortLeads));
+                }
+              } catch (finalErr) {
+                console.error("Error on final task fetch:", finalErr);
+              }
+              // Fetch latest source health after search completes
+              try { const hRes = await api.get("/source-health"); if (hRes.data.success) setSourceDiagnostics(hRes.data.diagnostics); } catch(e) {}
               loadDashboardData();
             }
           }
@@ -288,23 +401,46 @@ function App() {
   };
 
   const exportToCSV = () => {
-    const leadsToExport = filteredLeads.length > 0 ? filteredLeads : allLeads;
+    const leadsToExport = sortedLeads;
     if (leadsToExport.length === 0) return;
-    const headers = ["Business Name", "Phone", "WhatsApp", "Email", "Website", "Address", "State", "City", "Source", "Confidence", "Lead Score", "Services"];
-    const rows = leadsToExport.map((lead) => [
-      lead.businessName || "Unknown",
-      lead.phone || "N/A",
-      lead.whatsapp || "N/A",
-      lead.email || "N/A",
-      lead.website || "N/A",
-      lead.address || "N/A",
-      lead.state || "N/A",
-      lead.city || "N/A",
-      lead.source || "N/A",
-      lead.confidenceScore ? `${lead.confidenceScore}%` : "N/A",
-      lead.leadScore ? `${lead.leadScore}%` : "N/A",
-      lead.services ? lead.services.join("; ") : "N/A"
-    ]);
+    
+    const headers = [
+      "Business Name",
+      "Contact Person",
+      "Phone",
+      "WhatsApp",
+      "Email",
+      "Website",
+      "Address",
+      "City",
+      "Source",
+      "Confidence Score",
+      "Lead Score"
+    ];
+    
+    const rows = leadsToExport.map((lead) => {
+      const sourceDisplay = lead.isCached ? "Database Cache" : `Fresh Discovery (${lead.source || 'Web'})`;
+      let cleanWa = lead.whatsapp || "";
+      if (cleanWa.includes("wa.me") || cleanWa.includes("whatsapp.com")) {
+        cleanWa = cleanWa.replace(/[^0-9]/g, "");
+        if (cleanWa) cleanWa = `+${cleanWa}`;
+      }
+
+      return [
+        lead.businessName || "Unknown",
+        lead.ownerName || "N/A",
+        lead.phone || "N/A",
+        cleanWa || "N/A",
+        lead.email || "N/A",
+        lead.website || "N/A",
+        lead.address || "N/A",
+        lead.city || "N/A",
+        sourceDisplay,
+        lead.confidenceScore ? `${lead.confidenceScore}%` : "N/A",
+        lead.leadScore ? `${lead.leadScore}%` : "N/A"
+      ];
+    });
+
     const csvContent = [headers, ...rows]
       .map((row) => row.map((val) => `"${String(val).replace(/"/g, '""')}"`).join(","))
       .join("\n");
@@ -527,7 +663,31 @@ function App() {
             )}
 
             {!loading && statusText && (
-              <div style={{ textAlign: "center", color: "#EF4444", fontSize: 14, margin: "16px 0" }}>{statusText}</div>
+              <div className="ls-diagnostics-panel">
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <span style={{ fontSize: 18 }}>⚠️</span>
+                  <strong style={{ color: "#FBBF24", fontSize: 14 }}>Search completed with some source issues</strong>
+                </div>
+                {sourceDiagnostics && (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 8 }}>
+                    {Object.entries(sourceDiagnostics).map(([src, info]) => (
+                      <div key={src} className="ls-source-pill" style={{ 
+                        display: "flex", alignItems: "center", gap: 8, padding: "8px 12px",
+                        background: info.status === "healthy" || info.status === "idle" ? "rgba(16,185,129,.08)" : info.status === "disabled" ? "rgba(239,68,68,.08)" : "rgba(245,158,11,.08)",
+                        border: `1px solid ${info.status === "healthy" || info.status === "idle" ? "rgba(16,185,129,.2)" : info.status === "disabled" ? "rgba(239,68,68,.2)" : "rgba(245,158,11,.2)"}`,
+                        borderRadius: 8, fontSize: 12
+                      }}>
+                        <span>{info.icon}</span>
+                        <span style={{ textTransform: "capitalize", fontWeight: 500 }}>{src}</span>
+                        <span>{info.status === "healthy" || info.status === "idle" ? "✅" : info.status === "disabled" ? "❌" : "⚠️"}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ marginTop: 8, fontSize: 12, color: "#9CA3AF" }}>
+                  Cached leads from the database are still shown above. Failed sources were skipped automatically.
+                </div>
+              </div>
             )}
           </div>
 
@@ -557,18 +717,55 @@ function App() {
               </div>
               <button className="ls-error-retry-btn" onClick={loadDashboardData}>Retry Fetching</button>
             </div>
-          ) : allLeads.length > 0 ? (
+          ) : hasActiveSearch ? (
             <div className="ls-table-card">
               <div className="ls-table-header" style={{ flexDirection: "column", gap: 16, alignItems: "stretch" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
                   <div className="ls-table-title-wrap">
-                    <h3 className="ls-table-title">Lead Database</h3>
-                    <span className="ls-table-count">{filteredLeads.length} of {allLeads.length} leads</span>
+                    <h3 className="ls-table-title" style={{ fontSize: 18, textTransform: "capitalize" }}>🎯 {currentSearchQuery || "Search"} Results</h3>
+                    <div className="ls-table-count" style={{ display: "flex", gap: 12, marginTop: 4, flexWrap: "wrap" }}>
+                      <span>📊 Total Leads Found: <strong>{totalLeadsCount}</strong></span>
+                      <span style={{ opacity: 0.3 }}>|</span>
+                      <span>💾 Cached Results Found: <strong>{cachedLeadsCount}</strong></span>
+                      <span style={{ opacity: 0.3 }}>|</span>
+                      <span>🌱 New Leads Generated: <strong>{freshLeadsCount}</strong></span>
+                      <span style={{ opacity: 0.3 }}>|</span>
+                      <span>✨ Showing: <strong>Top {Math.min(visibleCount, totalLeadsCount)} Leads</strong></span>
+                    </div>
                   </div>
                   <div className="ls-table-actions">
                     <button className="ls-export-btn" onClick={exportToCSV}>📥 Export CSV</button>
                   </div>
                 </div>
+
+                {/* Source Distribution Row */}
+                {sortedLeads.length > 0 && (
+                  <div className="ls-source-dist-panel">
+                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", color: "#A5B4FC", fontWeight: 600, marginBottom: 8 }}>
+                      Sources Distribution
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {Object.entries(sourceDistribution).map(([src, count]) => {
+                        const colorMap = {
+                          "Google": "#4285F4",
+                          "Justdial": "#FF6A00",
+                          "Practo": "#00A3C4",
+                          "Zomato": "#CB202D",
+                          "Swiggy": "#FC8019",
+                          "Indiamart": "#005E82",
+                          "Web": "#10B981"
+                        };
+                        const color = colorMap[src] || "#8B5CF6";
+                        return (
+                          <div key={src} className="ls-source-dist-pill">
+                            <span style={{ width: 8, height: 8, borderRadius: "50%", background: color }} />
+                            <strong style={{ fontWeight: 500 }}>{src}</strong>: <span>{count}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Filters Panel */}
                 <div className="ls-filters-panel" style={{
@@ -585,7 +782,7 @@ function App() {
                     <span style={{ position: "absolute", left: 12, fontSize: 13, opacity: 0.5 }}>🔍</span>
                     <input
                       type="text"
-                      placeholder="Instant search leads..."
+                      placeholder="Instant search results..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       style={{
@@ -692,79 +889,117 @@ function App() {
               </div>
 
               <div className="ls-table-wrap">
-                {filteredLeads.length === 0 ? (
+                {sortedLeads.length === 0 ? (
                   <div className="ls-empty" style={{ padding: "40px 0", textAlign: "center" }}>
                     <div style={{ fontSize: 32, opacity: .4, marginBottom: 12 }}>🔍</div>
                     <div className="ls-empty-text" style={{ color: "#9CA3AF", fontSize: 14 }}>No leads match your current search/filters</div>
                   </div>
                 ) : (
-                  <table className="ls-table">
-                    <thead>
-                      <tr>
-                        <th>Business</th>
-                        <th>Category</th>
-                        <th>Location</th>
-                        <th>Phone & WhatsApp</th>
-                        <th>Email</th>
-                        <th>Website</th>
-                        <th>Confidence</th>
-                        <th>Lead Score</th>
-                        <th>Source</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredLeads.map((lead, index) => {
-                        const confidence = lead.confidenceScore || computeLeadScore(lead);
-                        const leadScore = lead.leadScore || computeLeadScore(lead);
-                        return (
-                          <tr key={index} className="ls-row" onClick={() => openDrawer(lead)}>
-                            <td>
-                              <div className="ls-biz-name">{lead.businessName || "Unknown"}</div>
-                              {lead.ownerName && <div className="ls-biz-cat">{lead.ownerName}</div>}
-                            </td>
-                            <td><span style={{ fontSize: 12, color: "#9CA3AF" }}>{lead.category || "—"}</span></td>
-                            <td>
-                              <span style={{ fontSize: 12, color: "#9CA3AF" }}>
-                                {lead.city || "—"}
-                                {lead.state && <span style={{ opacity: 0.5, marginLeft: 4 }}>({lead.state})</span>}
-                              </span>
-                            </td>
-                            <td>
-                              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                                {lead.phone ? <span className="ls-chip ls-chip-phone">{lead.phone}</span> : <span className="ls-no-data">—</span>}
-                                {lead.whatsapp && (
-                                  <span className="ls-chip" style={{ background: "rgba(37, 211, 102, 0.15)", color: "#25D366", width: "fit-content", fontSize: 10, alignSelf: "flex-start" }}>
-                                    wa: {lead.whatsapp.replace(/^https?:\/\/wa\.me\//, "")}
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                            <td>
-                              {lead.email ? <span className="ls-chip ls-chip-email">{lead.email}</span> : <span className="ls-no-data">—</span>}
-                            </td>
-                            <td>
-                              {lead.website ? (
-                                <span style={{ color: "#60A5FA", fontSize: 12, textDecoration: "none" }}>
-                                  {(() => { try { return new URL(lead.website).hostname.replace("www.", ""); } catch { return lead.website; } })()}
+                  <>
+                    <table className="ls-table">
+                      <thead>
+                        <tr>
+                          <th>Business</th>
+                          <th>Category</th>
+                          <th>Location</th>
+                          <th>Phone & WhatsApp</th>
+                          <th>Email</th>
+                          <th>Website</th>
+                          <th>Confidence</th>
+                          <th>Lead Score</th>
+                          <th>Source</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sortedLeads.slice(0, visibleCount).map((lead, index) => {
+                          const confidence = lead.confidenceScore || computeLeadScore(lead);
+                          const leadScore = lead.leadScore || computeLeadScore(lead);
+                          return (
+                            <tr key={index} className="ls-row" onClick={() => openDrawer(lead)}>
+                              <td>
+                                <div className="ls-biz-name">{lead.businessName || "Unknown"}</div>
+                                {lead.ownerName && <div className="ls-biz-cat">{lead.ownerName}</div>}
+                              </td>
+                              <td><span style={{ fontSize: 12, color: "#9CA3AF" }}>{lead.category || "—"}</span></td>
+                              <td>
+                                <span style={{ fontSize: 12, color: "#9CA3AF" }}>
+                                  {lead.city || "—"}
+                                  {lead.state && <span style={{ opacity: 0.5, marginLeft: 4 }}>({lead.state})</span>}
                                 </span>
-                              ) : <span className="ls-no-data">—</span>}
-                            </td>
-                            <td>
-                              <span className={`ls-score-badge ${getScoreClass(confidence)}`}>{confidence}%</span>
-                            </td>
-                            <td>
-                              <span className={`ls-score-badge ${getScoreClass(leadScore)}`}>{leadScore}% {getScoreLabel(leadScore)}</span>
-                            </td>
-                            <td><span className="ls-chip ls-chip-source">{lead.source || "Unknown"}</span></td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                              </td>
+                              <td>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                  {lead.phone ? <span className="ls-chip ls-chip-phone">{lead.phone}</span> : <span className="ls-no-data">—</span>}
+                                  {lead.whatsapp && (
+                                    <span className="ls-chip" style={{ background: "rgba(37, 211, 102, 0.15)", color: "#25D366", width: "fit-content", fontSize: 10, alignSelf: "flex-start" }}>
+                                      wa: {lead.whatsapp.replace(/^https?:\/\/wa\.me\//, "")}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td>
+                                {lead.email ? <span className="ls-chip ls-chip-email">{lead.email}</span> : <span className="ls-no-data">—</span>}
+                              </td>
+                              <td>
+                                {lead.website ? (
+                                  <span style={{ color: "#60A5FA", fontSize: 12, textDecoration: "none" }}>
+                                    {(() => { try { return new URL(lead.website).hostname.replace("www.", ""); } catch { return lead.website; } })()}
+                                  </span>
+                                ) : <span className="ls-no-data">—</span>}
+                              </td>
+                              <td>
+                                <span className={`ls-score-badge ${getScoreClass(confidence)}`}>{confidence}%</span>
+                              </td>
+                              <td>
+                                <span className={`ls-score-badge ${getScoreClass(leadScore)}`}>{leadScore}% {getScoreLabel(leadScore)}</span>
+                              </td>
+                              <td>
+                                <span className="ls-chip ls-chip-source">
+                                  {lead.isCached ? "Database Cache" : `Fresh Discovery (${lead.source || 'Unknown'})`}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    
+                    {sortedLeads.length > visibleCount && (
+                      <div style={{ display: "flex", justifyContent: "center", padding: "24px 0", borderTop: "1px solid rgba(255, 255, 255, 0.05)" }}>
+                        <button 
+                          onClick={() => setVisibleCount(prev => prev + 20)}
+                          className="ls-load-more-btn"
+                        >
+                          Load More Leads
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
-          ) : null}
+          ) : (
+            <div className="ls-welcome-card" style={{
+              textAlign: "center",
+              padding: "60px 40px",
+              background: "rgba(255, 255, 255, 0.02)",
+              backdropFilter: "blur(12px)",
+              border: "1px solid rgba(255, 255, 255, 0.05)",
+              borderRadius: 16,
+              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.3)",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              marginTop: 20
+            }}>
+              <div style={{ fontSize: 64, marginBottom: 20 }}>🔍</div>
+              <h3 style={{ fontSize: 24, fontWeight: 600, color: "#fff", marginBottom: 12 }}>Ready to Generate Leads?</h3>
+              <p style={{ fontSize: 15, color: "#9CA3AF", maxWidth: 500, lineHeight: 1.6, margin: 0 }}>
+                Enter your target industry and city in the AI search bar above to fetch real-time validated business leads. LeadSync will retrieve and validate the best 20 leads based on data confidence and completeness.
+              </p>
+            </div>
+          )}
         </div>
       </main>
 
@@ -904,7 +1139,9 @@ function App() {
               {/* Source */}
               <div className="ls-drawer-section">
                 <div className="ls-drawer-sectionTitle">📡 Discovery Source</div>
-                <span className="ls-chip ls-chip-source">{activeDetailLead.source || "Unknown"}</span>
+                <span className="ls-chip ls-chip-source">
+                  {activeDetailLead.isCached ? "Database Cache" : `Fresh Discovery (${activeDetailLead.source || 'Unknown'})`}
+                </span>
               </div>
 
               {/* AI Outreach */}

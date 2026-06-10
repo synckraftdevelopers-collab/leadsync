@@ -21,6 +21,8 @@ const DIRECTORY_PATTERNS = [
   "squareyards.com",
   "commonfloor.com",
   "makaan.com",
+  "zomato.com",
+  "swiggy.com",
   
   // Medical directories
   "practo.com",

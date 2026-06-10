@@ -12,6 +12,7 @@ const leadOrchestrator = require("./services/leadOrchestrator");
 const scrapeGraphEnrichment = require("./services/scrapeGraphEnrichment");
 const groqLeadValidator = require("./services/groqLeadValidator");
 const taskQueue = require("./services/taskQueue");
+const { getDiagnosticSummary, enableSource, getAllSourceHealth } = require("./services/sourceHealth");
 
 
 const app = express();
@@ -252,19 +253,15 @@ app.get("/tasks/:id", async (req, res) => {
       return res.status(404).json({ success: false, error: "Task not found" });
     }
 
-    // Fetch leads associated with this task by parsing the query's target category and city
-    const parsedQuery = await groqQueryParser(task.query);
-    const city = parsedQuery.city || "";
-    const category = parsedQuery.subCategory || parsedQuery.category || "";
-
+    // Fetch leads associated with this task via the task_leads join table
     let leads = [];
-    if (city && category) {
+    try {
       const result = await db.query(
-        `SELECT * FROM leads 
-         WHERE LOWER(city) = LOWER($1) 
-         AND (LOWER(category) = LOWER($2) OR LOWER(category) LIKE LOWER($3))
-         ORDER BY created_at DESC LIMIT 50`,
-         [city, category, `%${category}%`]
+        `SELECT l.*, tl.is_cached FROM leads l 
+         JOIN task_leads tl ON l.id = tl.lead_id
+         WHERE tl.task_id = $1
+         ORDER BY l.lead_score DESC, l.confidence_score DESC`,
+         [id]
       );
       leads = result.rows.map(row => ({
         id: row.id,
@@ -284,8 +281,11 @@ app.get("/tasks/:id", async (req, res) => {
         confidenceScore: row.confidence_score,
         leadScore: row.lead_score,
         isValidLead: row.is_valid_lead,
-        createdAt: row.created_at
+        createdAt: row.created_at,
+        isCached: row.is_cached
       }));
+    } catch (dbErr) {
+      console.error(`[Server] Error fetching leads for task ${id}:`, dbErr.message);
     }
 
     res.json({
@@ -342,6 +342,33 @@ app.get("/leads", async (req, res) => {
       success: false,
       error: error.message
     });
+  }
+});
+
+app.get("/source-health", async (req, res) => {
+  try {
+    const diagnostics = getDiagnosticSummary();
+    const recentLogs = await db.query(
+      "SELECT * FROM source_logs ORDER BY created_at DESC LIMIT 50"
+    );
+    res.json({
+      success: true,
+      diagnostics,
+      recentLogs: recentLogs.rows
+    });
+  } catch (error) {
+    console.error("[Server] GET /source-health error:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/source-health/:source/enable", async (req, res) => {
+  try {
+    const { source } = req.params;
+    enableSource(source);
+    res.json({ success: true, message: `Source ${source} re-enabled` });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

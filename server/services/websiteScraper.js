@@ -1,5 +1,6 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
+const { validateAndFormatPhone, validateEmail } = require("../utils/validator");
 
 /**
  * Generic Website Scraper
@@ -33,24 +34,20 @@ async function fetchPage(url) {
 function extractEmails(text) {
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-z]{2,}/g;
   const emails = text.match(emailRegex) || [];
-  return [...new Set(emails)].filter(e =>
-    !e.includes("example.com") &&
-    !e.includes("domain.com") &&
-    !e.includes("email.com") &&
-    !e.includes("sentry") &&
-    !e.includes("webpack") &&
-    !e.includes("wixpress") &&
-    !e.includes("placeholder")
-  );
+  return [...new Set(emails)]
+    .map(e => validateEmail(e))
+    .filter(Boolean);
 }
 
 /**
  * Extract phone numbers from text
  */
 function extractPhones(text) {
-  const phoneRegex = /(\+91[\-\s]?)?[0]?(91)?[6789]\d{9}/g;
+  const phoneRegex = /(?:\+91[\-\s]?)?[0]?(91)?[6789]\d{9}/g;
   const phones = text.match(phoneRegex) || [];
-  return [...new Set(phones.map(p => p.replace(/\s+/g, "")))];
+  return [...new Set(phones)]
+    .map(p => validateAndFormatPhone(p))
+    .filter(Boolean);
 }
 
 /**
